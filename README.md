@@ -1,278 +1,293 @@
-# Worktree Gateway (`wtg`)
+<h1 align="center">Worktree Gateway</h1>
 
-Worktree Gateway gives each Git worktree a stable runtime identity. It routes local traffic to that worktree's services, and routes external traffic too if you turn that on.
+<p align="center">
+  <b>Every Git worktree gets its own URL.</b><br>
+  Local hostnames, webhooks and OAuth callbacks, routed to the right checkout.
+</p>
+
+<p align="center">
+  <a href="https://github.com/chryzxc/worktree-gateway/releases"><img alt="release" src="https://img.shields.io/badge/release-v0.1.0-blue"></a>
+  <a href="go.mod"><img alt="go" src="https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="platforms" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="docs/configuration.md">Configuration</a> ·
+  <a href="docs/webhooks-and-oauth.md">Webhooks & OAuth</a> ·
+  <a href="#faq">FAQ</a>
+</p>
+
+---
+
+Working on three branches at once in three worktrees, or with three AI agents? Each one still wants `localhost:3000`, the same cookie domain, the same Stripe webhook URL and the same OAuth redirect URI.
+
+`wtg` gives each worktree a stable identity and routes traffic to it:
 
 ```
-feature/auth worktree    →  https://feature-auth.shop.localhost:8743
-  └─ api service         →  https://api.feature-auth.shop.localhost:8743
-Stripe webhook (tunnel)  →  https://<tunnel>/w/feature-auth/webhooks/stripe
-OAuth callback           →  https://<tunnel>/_wg/oauth/callback  →  the worktree that started the login
+~/src/shop            (main)          →  https://main.shop.localhost:8743   (also https://shop.localhost:8743)
+~/src/shop.auth       (feature/auth)  →  https://feature-auth.shop.localhost:8743
+  └─ api service                      →  https://api.feature-auth.shop.localhost:8743
+
+Stripe        →  https://<tunnel>/w/feature-auth/webhooks/stripe  →  feature/auth worktree
+GitHub login  →  https://<tunnel>/_wg/oauth/callback              →  whichever worktree started it
 ```
 
-It does **not** manage worktrees; use [Worktrunk](https://worktrunk.dev) or plain `git worktree` for that. It does **not** implement a proxy or a tunnel either. Local routing is done by [Caddy](https://caddyserver.com), embedded or your own. Public exposure uses cloudflared, ngrok or any tunnel you already run.
+## Features
 
-See [docs/PLAN.md](docs/PLAN.md) for the tool audit, design decisions and roadmap.
+- 🌐 **A URL per worktree.** `{branch}.{project}.localhost` over HTTP and HTTPS. No `/etc/hosts` edits, no root.
+- 🔢 **No port juggling.** Every service gets a stable, collision-free `$PORT`, and URLs stay the same across restarts.
+- 🧩 **Many services per worktree.** `web`, `api`, `docs`… each with its own hostname and `WG_*_URL` env var.
+- 🔄 **Follows git.** New, removed, renamed and moved worktrees are picked up automatically.
+- 🪝 **Webhooks into any worktree.** One tunnel for all of them, with only the paths you allowlist exposed.
+- 🔐 **One OAuth redirect URI for every worktree.** Signed state sends each login back to the right checkout.
+- 🔁 **Webhook replay.** Inspect captured requests (credentials redacted) and re-send them to any worktree.
+- 🧱 **Built on proven tools.** [Caddy](https://caddyserver.com) does the routing, and cloudflared or ngrok do the tunnelling. Pairs with [Worktrunk](https://worktrunk.dev).
 
 ## Install
 
+**macOS / Linux (recommended)**
+
+The repository is private, so the installer downloads through the GitHub CLI (`gh auth login` once):
+
 ```sh
-go install github.com/chryzxc/worktree-gateway/cmd/wtg@latest
+gh api repos/chryzxc/worktree-gateway/contents/install.sh -H 'Accept: application/vnd.github.raw' | sh
 ```
 
-The binary is named `wtg`, not `wg`, because `wg` is WireGuard's CLI. Environment variables keep the `WG_` prefix.
+This installs the latest release to `~/.local/bin/wtg` and verifies its checksum. Set `WTG_INSTALL_DIR` to install somewhere else, or `WTG_VERSION=v0.1.0` to pin a version.
+
+<details>
+<summary>Other methods</summary>
+
+**Download a release manually.** Grab `wtg_<version>_<os>_<arch>.tar.gz` from [Releases](https://github.com/chryzxc/worktree-gateway/releases), extract it, and put `wtg` on your `PATH`.
+
+**With Go 1.26+:**
+
+```sh
+GOPRIVATE=github.com/chryzxc/worktree-gateway go install github.com/chryzxc/worktree-gateway/cmd/wtg@latest
+```
+
+**From source:**
+
+```sh
+git clone https://github.com/chryzxc/worktree-gateway && cd worktree-gateway && make install
+```
+
+</details>
+
+Check your setup:
+
+```sh
+wtg doctor
+```
 
 ## Quick start
 
 ```sh
-cd ~/src/shop                 # any git repo
-wtg up                        # registers this worktree (daemon auto-starts)
-wtg run web -- npm run dev    # allocates PORT, injects WG_* env, routes while running
-wtg status
-# WORKTREE     BRANCH  SERVICE  STATUS  UPSTREAM         URL
-# main (main)  main    web      up      127.0.0.1:24817  https://main.shop.localhost:8743
-
-wtg trust                     # once: trust the local CA for HTTPS (explicit, may prompt)
+cd ~/src/shop
+wtg init          # writes wtg.yaml (guesses your dev command)
+wtg run           # starts it on a stable $PORT and routes it
+wtg open          # → https://main.shop.localhost:8743
+wtg trust         # once: trust the local HTTPS certificate
 ```
 
-Create a second worktree with `git worktree add ../shop.auth -b feature/auth`, or with `wt switch -c feature/auth`. Run `wtg up` there and it gets `feature-auth.shop.localhost` next to the first one. The main worktree also answers on the bare project domain, `shop.localhost`.
-
-`*.localhost` resolves to loopback in browsers and on most systems (RFC 6761), so nothing touches `/etc/hosts`. `wtg hosts` prints lines you can add yourself for tools that don't resolve it. The gateway listens on unprivileged loopback ports: 8780 for HTTP, 8743 for HTTPS and 8790 for ingress. It needs no root.
-
-Services you already start some other way can be registered directly:
+Now add a second worktree. Any tool works:
 
 ```sh
-wtg register api --port 4000 [--pid 1234]   # with --pid, removed when that process exits
-wtg deregister api
+git worktree add ../shop.auth -b feature/auth
+cd ../shop.auth && wtg run
+# wtg: feature-auth/web on port 24817 → https://feature-auth.shop.localhost:8743
 ```
 
-## Worktrunk integration
+Both run side by side, each on its own URL:
+
+```console
+$ wtg status
+WORKTREE      BRANCH        SERVICE  STATUS  UPSTREAM         URL
+main (main)   main          web      up      127.0.0.1:21853  https://main.shop.localhost:8743
+feature-auth  feature/auth  web      up      127.0.0.1:24817  https://feature-auth.shop.localhost:8743
+```
+
+Remove the worktree with `git worktree remove` and its routes disappear.
+
+> [!TIP]
+> Your dev server must listen on `$PORT`. Most frameworks (Next.js, Express, Rails, Django, Phoenix…) read it automatically. Vite needs `vite --port $PORT`.
+
+## Usage
+
+### Run services
 
 ```sh
-wtg hooks worktrunk --write     # appends to .config/wt.toml
+wtg run                           # the default service, command from wtg.yaml
+wtg run api -- go run ./cmd/api   # any command; gets PORT and WG_* env
+wtg register db-admin --port 8081 # route something you started yourself
 ```
 
-```toml
-[post-start]
-gateway = "wtg up --path {{ worktree_path }}"
+`wtg run` injects identity env vars. Apps use them to build absolute URLs and to find their sibling services:
 
-[pre-remove]
-gateway = "wtg down --path {{ worktree_path }} --forget"
+```sh
+WG_URL=https://feature-auth.shop.localhost:8743
+WG_API_URL=https://api.feature-auth.shop.localhost:8743
+WG_WORKTREE=feature-auth   WG_BRANCH=feature/auth   PORT=24817
 ```
 
-Worktrunk's `hash_port` range is 10000–19999. The gateway allocates ports from 20000–29999 so the two never collide. Neither integration is required: the daemon also runs `git worktree list` every 10s. It adds new worktrees, drops removed ones, re-slugs renamed branches and follows `git worktree move`.
+Use `eval "$(wtg env)"` to load the same variables into your shell. The [full list](docs/configuration.md#environment-variables) is in the configuration docs.
 
-## Identity model
-
-| Thing | Identity | Stable across |
-|---|---|---|
-| Project | `sha256(git common dir)` | clones at other paths get their own identity |
-| Worktree | git admin dir (`.git/worktrees/<id>`; `.` for main) | `git worktree move`, branch renames |
-| Hostname label | branch → `[a-z0-9-]`, ≤63 chars | pinned with `wtg up --name x` or `WG_WORKTREE=x` |
-
-A detached HEAD uses the directory name. If two branches sanitize to the same label, the later worktree gets a `-abcd` hash suffix. If two projects claim the same hostname, the earlier registration keeps it and `wtg status` shows the conflict.
-
-## Environment injected by `wtg run` / `wtg env`
-
-Only gateway identity is injected. Application config and secrets stay in your own tooling.
-
-| Variable | Example |
-|---|---|
-| `WG_GATEWAY` | `1` |
-| `WG_PROJECT`, `WG_PROJECT_DOMAIN` | `shop`, `shop.localhost` |
-| `WG_WORKTREE`, `WG_WORKTREE_PATH`, `WG_BRANCH` | `feature-auth`, `/src/shop.auth`, `feature/auth` |
-| `WG_URL` | default service URL |
-| `WG_<SVC>_URL`, `WG_<SVC>_HOST` | every service of this worktree (e.g. `WG_API_URL`) |
-| `WG_SERVICE`, `WG_SERVICE_URL`, `PORT` | the service being run |
-| `WG_PUBLIC_URL` | public base URL while a tunnel runs |
-| `WG_OAUTH_CALLBACK_URL`, `WG_OAUTH_STATE_KEY` | when `oauth_callbacks` is configured |
-
-`eval "$(wtg env)"` exports the same variables into your shell.
-
-## Project config: `wtg.yaml`
-
-Optional. Place it at the worktree root; `.wtg.yaml` and `.yml` also work. See [`examples/wtg.yaml`](examples/wtg.yaml).
+### Several services
 
 ```yaml
-project: shop                 # default: main worktree directory name
-domain: shop.localhost        # default: {project}.localhost
-default_service: web          # default: "web" if defined, else the only service
-main_alias: true              # main worktree also answers on {domain}
+# wtg.yaml
+project: shop
 services:
   web:
-    command: npm run dev -- --port $PORT   # used by `wtg run web`
-    port: auto                              # or a fixed number
-    health: /healthz                        # optional; "up" = non-5xx
-    public:
-      paths: [/webhooks]                    # ONLY these prefixes are reachable publicly
-    oauth_callbacks: [/auth/callback]
+    command: npm run dev
   api:
-    hostname: "api.{worktree}.{domain}"     # default for non-default services
+    command: go run ./cmd/api
+    health: /healthz
 ```
 
-## Global config
+`web` is served at `feature-auth.shop.localhost` and `api` at `api.feature-auth.shop.localhost`. All options are in the [configuration reference](docs/configuration.md).
 
-The global config lives at `~/.config/worktree-gateway/config.yaml` (`WTG_CONFIG` or `WTG_HOME` override it). State lives at `~/.local/state/worktree-gateway` (override with `WTG_HOME`).
+### Webhooks
 
 ```yaml
-listen_host: 127.0.0.1        # must be loopback
-http_port: 8780
-https_port: 8743
-https: true
-proxy:
-  provider: embedded          # or caddy-admin (POST config to an existing Caddy)
-  admin_url: http://localhost:2019
-ingress:
-  port: 8790                  # the only thing a tunnel points at
-  hold: 10s                   # hold public requests while a service restarts
-tunnel:
-  provider: cloudflared       # cloudflared | ngrok | external
-  public_url: ""              # required for external / named tunnels
-  public_domain: ""           # enables <worktree>.<public_domain> host routing
-  name: ""                    # named cloudflared tunnel
-capture:
-  enabled: true
-  bodies: true                # false: metadata only
-  max_entries: 500
-  max_age: 168h
-  max_body: 1048576
-oauth:
-  state_ttl: 15m
-health_interval: 2s
-discovery_interval: 10s
-stale_after: 10m              # unhealthy registrations without a PID are dropped
-port_range: [20000, 29999]
+services:
+  web:
+    public:
+      paths: [/webhooks]      # the only paths reachable from the internet
 ```
-
-## External traffic (Phase 2/3)
 
 ```sh
-wtg tunnel start                      # cloudflared quick tunnel by default
-wtg status                            # shows https://<random>.trycloudflare.com/w/<worktree>
+wtg tunnel start              # needs cloudflared (default) or ngrok
+wtg status                    # public: https://abc.trycloudflare.com/w/feature-auth
 ```
 
-All worktrees share one tunnel, and the tunnel points only at the gateway ingress. Requests route by path, `/w/<worktree>[.<project>]/<path>`, or by host, `<worktree>.<public_domain>`, if you have a wildcard hostname.
-
-The ingress only forwards when all of these are true:
-
-1. A tunnel was started. Before that, the ingress refuses everything.
-2. The worktree exists, and the target service lists a matching prefix in `public.paths`. The longest prefix wins, matching whole segments. The path is normalised before matching, so `..` and `%2e%2e` cannot escape the allowlist.
-3. The upstream is a registered loopback service. The gateway never proxies to arbitrary hosts, so there is no SSRF and no open proxy.
-
-The prefix `/w/<worktree>` is stripped; set `public.strip_prefix: false` to keep it. The original body is forwarded byte-for-byte, and the Host and signature headers are kept, so Stripe, GitHub and Slack signature checks still work. `X-Forwarded-Prefix` carries the stripped prefix. If the service is restarting, the request is held for up to `ingress.hold` and then gets a 503 with `Retry-After`, so providers retry.
-
-### Request log and replay
+Point Stripe at `https://abc.trycloudflare.com/w/feature-auth/webhooks/stripe`. Then inspect and replay what arrived:
 
 ```sh
-wtg requests                     # recent public requests (source detected: stripe, github, slack…)
-wtg requests req_1a2b3c4d        # full detail
-wtg replay req_1a2b3c4d --yes    # POST needs --yes
-wtg replay req_1a2b3c4d --to feature-other --yes
-wtg requests --clear
+wtg requests
+wtg replay req_1a2b3c4d --yes
+wtg replay req_1a2b3c4d --to main --yes   # send it to another worktree
 ```
-
-The log is bounded to 500 entries and 7 days, with bodies capped at 1 MiB. It is a 0600 file in the state dir. Credential headers are redacted: `Authorization`, `Cookie`, signature and token headers, plus any you add. Credential-like query values are redacted too.
-
-A replayed request carries `X-Wg-Replay: 1` and `X-Wg-Replay-Of: <id>`. Redacted headers are **not** re-sent, so a signature check has to recognise replays, for example with a test-mode bypass. A request whose body was not captured, or was truncated, is never replayed.
 
 ### OAuth callbacks
 
-Register one redirect URI with the provider: `<public url>/_wg/oauth/callback`, which `WG_OAUTH_CALLBACK_URL` holds. Without a tunnel it is `https://<project domain>/_wg/oauth/callback`, which works for providers that accept localhost callbacks. Then send each worktree's login with a **signed state**:
+Register **one** redirect URI with your provider. The gateway sends each callback back to the worktree that started the login, using signed state. See [docs/webhooks-and-oauth.md](docs/webhooks-and-oauth.md#oauth-callbacks) for the Node and Go snippets.
+
+### Worktrunk
 
 ```sh
-wtg oauth state --callback /auth/callback --state <your-own-state>
+wtg hooks worktrunk --write   # new worktrees register themselves; removal cleans up
 ```
 
-When the provider redirects back, the gateway checks the state. The HMAC must be valid, it must not be expired, it must not have been used before, and its path must be listed in `oauth_callbacks`. The gateway then redirects the browser to `<worktree URL>/auth/callback?code=…&state=<your-own-state>`. For `response_mode=form_post` it re-posts the form instead. Unsigned, tampered, expired and replayed states are rejected, so the callback endpoint cannot be used as an open redirect.
+### Command reference
 
-Apps usually mint the state themselves using `WG_OAUTH_STATE_KEY`. That key is per-worktree and can only sign states for its own worktree.
+| Command | Description |
+|---|---|
+| `wtg init` | Create a starter `wtg.yaml` |
+| `wtg run [svc] [-- cmd…]` | Run a dev server with `$PORT` and identity env, routed while it runs |
+| `wtg open [svc]` | Open the worktree's URL in the browser |
+| `wtg status [-a] [--json]` | Worktrees, services, health and URLs |
+| `wtg up` / `wtg down [--forget]` | Register a worktree or take its routes down (usually automatic) |
+| `wtg register <svc> --port N` / `wtg deregister <svc>` | Route a process you started yourself |
+| `wtg env [svc]` / `wtg port [svc]` | Print identity exports or the stable port |
+| `wtg tunnel start\|stop\|status` | Opt-in public exposure |
+| `wtg requests [id]` / `wtg replay <id>` | Inspect and replay webhook traffic |
+| `wtg oauth state --callback /path` | Mint a signed OAuth state |
+| `wtg trust` / `wtg untrust` | Install or remove the local HTTPS CA |
+| `wtg doctor` · `wtg hosts` · `wtg hooks worktrunk` | Diagnostics and integrations |
+| `wtg daemon start\|stop\|status\|run` | Background daemon (auto-started) |
 
-Format: `base64url(json) + "." + base64url(HMAC-SHA256(key, base64url(json)))`. The JSON is:
+Run `wtg <command> --help` for flags and examples.
 
-```json
-{"v":1,"p":"<WG_PROJECT>","w":"<WG_WORKTREE>","s":"<service>","path":"/auth/callback","st":"<your state>","exp":<unix>,"n":"<random nonce>"}
+## How it works
+
+```
+ wtg CLI ──unix socket──► wtg daemon ─┬─ registry        projects → worktrees → services
+                                      ├─ discovery       git worktree list (add/remove/rename/move)
+                                      ├─ health checks   process + port / HTTP probe
+                                      ├─ Caddy ─────────► :8780 http · :8743 https (local CA)
+                                      └─ ingress :8790 ◄─ cloudflared / ngrok   (only when you start a tunnel)
 ```
 
-```js
-import crypto from "node:crypto";
-export function wgState(appState, path = "/auth/callback", ttlSec = 900) {
-  const b64 = (b) => Buffer.from(b).toString("base64url");
-  const body = b64(JSON.stringify({
-    v: 1, p: process.env.WG_PROJECT, w: process.env.WG_WORKTREE, s: process.env.WG_SERVICE,
-    path, st: appState, exp: Math.floor(Date.now() / 1000) + ttlSec, n: crypto.randomBytes(12).toString("base64url"),
-  }));
-  const mac = crypto.createHmac("sha256", Buffer.from(process.env.WG_OAUTH_STATE_KEY, "hex")).update(body).digest();
-  return `${body}.${b64(mac)}`;
-}
-```
-
-```go
-func wgState(appState, path string) string {
-	key, _ := hex.DecodeString(os.Getenv("WG_OAUTH_STATE_KEY"))
-	nonce := make([]byte, 12)
-	rand.Read(nonce)
-	body, _ := json.Marshal(map[string]any{"v": 1, "p": os.Getenv("WG_PROJECT"), "w": os.Getenv("WG_WORKTREE"),
-		"s": os.Getenv("WG_SERVICE"), "path": path, "st": appState,
-		"exp": time.Now().Add(15 * time.Minute).Unix(), "n": base64.RawURLEncoding.EncodeToString(nonce)})
-	head := base64.RawURLEncoding.EncodeToString(body)
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(head))
-	return head + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-```
-
-When the app gets the callback, it checks `state` against its own session value as usual.
+A worktree's identity comes from git itself, so moving the worktree or renaming its branch doesn't break it. Every change rebuilds Caddy's config and reloads it with no downtime. The ingress only forwards allowlisted paths to registered loopback services. The design and the trade-offs are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Security
 
-| Requirement | How |
+`wtg` is a local development tool and is safe by default:
+
+- Nothing is reachable from outside until you run `wtg tunnel start`. After that, only the paths in `public.paths` are reachable.
+- It only forwards to registered services on loopback, so it cannot act as an open proxy or be used for SSRF.
+- OAuth state is HMAC-signed, expires, can only be used once, and must match a path you allowlisted.
+- The request log is size- and time-bounded, redacts credentials, is readable only by you, and can skip bodies.
+- The control API is a user-only unix socket. There is no root access, `/etc/hosts` is never edited, and the CA is trusted only when you run `wtg trust`.
+
+The details and how to report a vulnerability are in [SECURITY.md](SECURITY.md).
+
+## FAQ
+
+<details>
+<summary><b>Why <code>wtg</code> and not <code>wg</code>?</b></summary>
+
+`wg` is WireGuard's CLI. The environment variables keep the `WG_` prefix.
+</details>
+
+<details>
+<summary><b>Why port 8743 instead of 443?</b></summary>
+
+Binding ports below 1024 needs root, and `wtg` never asks for it. To use `https://feature-auth.shop.localhost` without a port, run your own Caddy on 443 and set `proxy.provider: caddy-admin`. `wtg` then pushes its routes to that Caddy instead.
+</details>
+
+<details>
+<summary><b>A tool can't resolve <code>*.localhost</code>.</b></summary>
+
+Browsers and most systems resolve it to loopback (RFC 6761). For tools that don't, `wtg hosts` prints `/etc/hosts` lines you can add, or use `curl --resolve host:8743:127.0.0.1`.
+</details>
+
+<details>
+<summary><b>How does this compare to Portless, Portree or Worktrunk?</b></summary>
+
+[Portless](https://github.com/vercel-labs/portless) gives apps `*.localhost` names with its own proxy. Portree supervises processes per worktree. [Worktrunk](https://worktrunk.dev) creates and manages worktrees, and works well with `wtg`.
+
+`wtg` treats a worktree, with all of its services, as one identity tracked from git. It adds external webhook and OAuth routing plus replay, and it builds on Caddy rather than its own proxy. The full comparison is in [docs/PLAN.md](docs/PLAN.md#1-audit-of-existing-tools-september-2026).
+</details>
+
+<details>
+<summary><b>Does it restart my crashed dev server?</b></summary>
+
+No. `wtg` is not a process supervisor. When a service dies, its route shows "service not running", and public webhook requests are held briefly (then answered 503) so providers retry.
+</details>
+
+<details>
+<summary><b>Something isn't working.</b></summary>
+
+Run `wtg doctor`, then check `~/.local/state/worktree-gateway/daemon.log`. Common fixes:
+
+| Symptom | Fix |
 |---|---|
-| Public exposure is opt-in | The ingress forwards nothing until `wtg tunnel start`. Only `public.paths` prefixes are reachable. Local-only services have no public route. |
-| No SSRF / open proxy | Upstreams must be loopback (`127.0.0.0/8`, `::1`) and registered. Request data never picks the target host. Paths are normalised before matching. |
-| Signed callback state | HMAC-SHA256 with a per-worktree key from a 0600 master key. Expiry and single-use nonces are enforced, and the callback path must be allowlisted. |
-| Bounded, redacted storage | The capture log has entry, age and body caps, redacts headers and query values, is a 0600 file, can stop capturing bodies (`capture.bodies: false`) or be disabled entirely. OAuth callbacks are never captured. |
-| Admin surface is local | The control API is a 0600 unix socket. Embedded Caddy's admin API is disabled. All listeners must bind loopback. |
-| No privileged changes | No root and no `/etc/hosts` edits. The CA is trusted only by an explicit `wtg trust`. |
+| Browser certificate warning | `wtg trust` (restart Firefox) |
+| `address already in use` | change `http_port` / `https_port` / `ingress.port` in `~/.config/worktree-gateway/config.yaml` |
+| Service stuck on `starting` | your server isn't listening on `$PORT` |
+| Webhook 404 through the tunnel | the path isn't in `public.paths`, or the worktree name is wrong (`wtg status`) |
+| Replayed webhook fails its signature check | expected: signature headers are redacted, so detect `X-Wg-Replay: 1` in test mode |
+</details>
 
-## Commands
+## Roadmap
 
-| | |
-|---|---|
-| `wtg up [--name N] [--path P]` | register a worktree (idempotent; also unparks it) |
-| `wtg down [--forget]` | park the worktree's routes, or with `--forget` drop its identity |
-| `wtg run [svc] [-- cmd…]` | run a dev server with PORT and identity env; routed while it lives |
-| `wtg register svc --port N [--pid P]` / `wtg deregister svc` | route an existing process |
-| `wtg status [-a] [--json]` | worktrees, services, health, URLs |
-| `wtg port [svc]` / `wtg env [svc]` | stable port / identity exports |
-| `wtg tunnel start\|stop\|status [--provider]` | opt-in public exposure |
-| `wtg requests [id] [-w wt] [--clear]` / `wtg replay id [--to wt] [--yes]` | request log & replay |
-| `wtg oauth state --callback /path [--state s]` | mint signed OAuth state |
-| `wtg trust` / `wtg untrust` | install/remove the local CA |
-| `wtg doctor`, `wtg hosts`, `wtg hooks worktrunk [--write]` | diagnostics & integration |
-| `wtg daemon run\|start\|stop\|status` | daemon lifecycle (normally auto-started) |
+- [x] Local identity and routing, health, discovery, Worktrunk hooks
+- [x] Multi-service, env injection, HTTPS, tunnels, opt-in exposure
+- [x] Webhook routing, request log, replay, signed OAuth callbacks
+- [ ] Homebrew tap
+- [ ] Windows support (it builds, but is untested)
+- [ ] `wtg ui`: a local dashboard for requests and routes
 
-## Non-goals
+## Contributing
 
-`wtg` is not a process supervisor: `wtg run` does not restart anything. It is not an env or secret manager, and not production ingress. It also does not depend on Hermes or State Capsule, which stay independent.
-
-## Status
-
-| Phase | Scope | State |
-|---|---|---|
-| MVP | git discovery, identity model, `.localhost` hostnames, dynamic Caddy routing, status, safe deregistration, Worktrunk hooks | ✅ implemented, tested |
-| 2 | multi-service templates, env injection, HTTPS (Caddy internal CA), tunnels (cloudflared/ngrok/external), opt-in exposure | ✅ implemented; cloudflared/ngrok parsing unit-tested with fake binaries |
-| 3 | webhook routing, bounded request log, replay, signed OAuth callback routing | ✅ implemented, tested |
-
-Not yet done: packaged releases, a Windows CI run (the code builds for Windows but is untested there), and a live end-to-end test against a real cloudflared or ngrok account.
-
-## Development
-
-```sh
-make test      # go test -race ./...
-make build     # ./bin/wtg
-```
-
-Test the binary against a scratch state dir with `WTG_HOME=$(mktemp -d) WTG_SOCKET=/tmp/wtg-dev.sock ./bin/wtg …`.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup (`make build test lint`) and the project's non-goals. Changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Christian Rey Villablanca

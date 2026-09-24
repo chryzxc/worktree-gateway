@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not route, register or behave as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. git worktree add ../app.feat -b feat
+        2. wtg up && wtg run web -- npm run dev
+        3. curl https://feat.app.localhost:8743 → 502
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `wtg version` and `wtg doctor`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant daemon log
+      description: "`~/.local/state/worktree-gateway/daemon.log`. Remove any secrets."
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: wtg.yaml / global config (if relevant)
+      render: yaml

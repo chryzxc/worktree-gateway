@@ -30,7 +30,7 @@ It does not create worktrees (use Worktrunk or git), run your processes
 		Version:       version.Version,
 	}
 	root.AddCommand(
-		daemonCmd(), upCmd(), downCmd(), registerCmd(), deregisterCmd(), statusCmd(),
+		initCmd(), openCmd(), daemonCmd(), upCmd(), downCmd(), registerCmd(), deregisterCmd(), statusCmd(),
 		portCmd(), envCmd(), runCmd(), tunnelCmd(), requestsCmd(), replayCmd(), oauthCmd(),
 		doctorCmd(), trustCmd(), untrustCmd(), hostsCmd(), hooksCmd(), versionCmd(),
 	)

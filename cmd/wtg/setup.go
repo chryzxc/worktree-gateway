@@ -249,36 +249,41 @@ func hooksCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			file := filepath.Join(repo.TopLevel, ".config", "wt.toml")
-			existing, err := os.ReadFile(file)
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			s := string(existing)
-			if strings.Contains(s, "wtg up") {
-				fmt.Println(file, "already contains wtg hooks")
-				return nil
-			}
-			if strings.Contains(s, "[post-start]") || strings.Contains(s, "[pre-remove]") {
-				return fmt.Errorf("%s already has [post-start]/[pre-remove] sections; add these entries manually:\n\n%s", file, worktrunkHooks)
-			}
-			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-				return err
-			}
-			if s != "" && !strings.HasSuffix(s, "\n") {
-				s += "\n"
-			}
-			if s != "" {
-				s += "\n"
-			}
-			if err := os.WriteFile(file, []byte(s+worktrunkHooks), 0o644); err != nil {
-				return err
-			}
-			fmt.Println("wrote", file)
-			return nil
+			return writeWorktrunkHooks(repo.TopLevel)
 		},
 	}
 	wt.Flags().BoolVar(&write, "write", false, "append the hooks to the repository's .config/wt.toml")
 	cmd.AddCommand(wt)
 	return cmd
+}
+
+// writeWorktrunkHooks appends the gateway hooks to <top>/.config/wt.toml.
+func writeWorktrunkHooks(top string) error {
+	file := filepath.Join(top, ".config", "wt.toml")
+	existing, err := os.ReadFile(file)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	s := string(existing)
+	if strings.Contains(s, "wtg up") {
+		fmt.Println(file, "already contains wtg hooks")
+		return nil
+	}
+	if strings.Contains(s, "[post-start]") || strings.Contains(s, "[pre-remove]") {
+		return fmt.Errorf("%s already has [post-start]/[pre-remove] sections; add these entries manually:\n\n%s", file, worktrunkHooks)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	if s != "" && !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	if s != "" {
+		s += "\n"
+	}
+	if err := os.WriteFile(file, []byte(s+worktrunkHooks), 0o644); err != nil {
+		return err
+	}
+	fmt.Println("wrote", file)
+	return nil
 }
