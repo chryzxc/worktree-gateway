@@ -24,9 +24,9 @@ Full design notes: [docs/PLAN.md](docs/PLAN.md#7-security-requirements--implemen
 
 ## Reporting a vulnerability
 
-Please **do not open a public issue**. Use GitHub's
-[private vulnerability reporting](https://github.com/chryzxc/worktree-gateway/security/advisories/new),
-or email the maintainer at the address on the GitHub profile.
+Please **do not open a public issue**. Email the maintainer at the address on
+[their GitHub profile](https://github.com/chryzxc). Once the repository is public, you can also use
+GitHub's [private vulnerability reporting](https://github.com/chryzxc/worktree-gateway/security/advisories/new).
 
 Please include:
 - the version (`wtg version`) and OS

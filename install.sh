@@ -41,9 +41,13 @@ download() {
   else api="https://api.github.com/repos/$REPO/releases/tags/$VERSION"; fi
   json=$(curl -fsSL ${auth:+-H "$auth"} "$api") || return 1
   for want in "_${os}_${arch}.tar.gz" "checksums.txt"; do
-    # Each asset's API url precedes its name in the JSON.
-    url=$(printf '%s' "$json" | tr ',' '\n' | grep -B3 "\"name\": *\"[^\"]*$want\"" | grep '"url"' | head -1 | sed 's/.*"url": *"\([^"]*\)".*/\1/')
-    name=$(printf '%s' "$json" | tr ',' '\n' | grep "\"name\": *\"[^\"]*$want\"" | head -1 | sed 's/.*"name": *"\([^"]*\)".*/\1/')
+    # In each asset object the API "url" field precedes "name".
+    line=$(printf '%s' "$json" | tr ',{}' '\n\n\n' | awk -v want="$want" '
+      /"url": *"/ { u = $0; sub(/.*"url": *"/, "", u); sub(/".*/, "", u) }
+      /"name": *"/ { n = $0; sub(/.*"name": *"/, "", n); sub(/".*/, "", n)
+                     if (substr(n, length(n) - length(want) + 1) == want) { print u " " n; exit } }')
+    url=${line%% *}
+    name=${line#* }
     [ -n "$url" ] && [ -n "$name" ] || return 1
     curl -fsSL ${auth:+-H "$auth"} -H 'Accept: application/octet-stream' -o "$tmp/$name" "$url" || return 1
   done
