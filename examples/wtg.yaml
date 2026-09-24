@@ -1,0 +1,25 @@
+# Worktree Gateway project config — commit this at the repository root.
+# Every key is optional; without this file each worktree gets one "web"
+# service routed at {worktree}.{project}.localhost.
+
+project: shop
+# domain: shop.localhost
+# default_service: web
+# main_alias: true            # main worktree also answers on {domain}
+
+services:
+  web:
+    command: npm run dev -- --port $PORT
+    health: /healthz
+    public:
+      paths: [/webhooks]       # only these prefixes are reachable through a tunnel
+    oauth_callbacks: [/auth/callback]
+
+  api:
+    command: go run ./cmd/api  # reads $PORT
+    # hostname: "api.{worktree}.{domain}"   (default for non-default services)
+    public:
+      paths: [/stripe/events]
+
+  worker:
+    port: 7070                 # fixed port instead of auto
