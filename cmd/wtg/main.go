@@ -58,6 +58,7 @@ func versionCmd() *cobra.Command {
 func client() (*api.Client, error) {
 	c := api.NewClient(config.SocketPath())
 	if c.Ping() {
+		warnVersionSkew(c)
 		return c, nil
 	}
 	if os.Getenv("WTG_NO_AUTOSTART") != "" {
@@ -67,6 +68,22 @@ func client() (*api.Client, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// warnVersionSkew notes when the running daemon is not this binary's version
+// (typically after an upgrade): it keeps serving the old behavior until it
+// is restarted.
+func warnVersionSkew(c *api.Client) {
+	var v api.VersionResponse
+	if err := c.Do("GET", "/v1/version", nil, nil, &v); err == nil && v.Version == version.Version {
+		return
+	}
+	running := v.Version
+	if running == "" {
+		running = "an older version"
+	}
+	fmt.Fprintf(os.Stderr, "wtg: note: the running daemon is %s but this binary is %s; run `wtg daemon restart`\n",
+		running, version.Version)
 }
 
 // startDaemon launches `wtg daemon run` detached and waits for its socket.
@@ -98,6 +115,9 @@ func startDaemon() error {
 	for {
 		select {
 		case err := <-exited:
+			if c.Ping() {
+				return nil // another wtg started the daemon first
+			}
 			return fmt.Errorf("daemon exited during startup (%v); see %s", err, logPath)
 		case <-deadline:
 			return fmt.Errorf("daemon did not start within 15s; see %s", logPath)

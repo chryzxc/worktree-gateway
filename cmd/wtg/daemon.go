@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -54,18 +55,31 @@ func daemonCmd() *cobra.Command {
 		&cobra.Command{
 			Use: "stop", Short: "Stop the daemon (routes and tunnel go away)",
 			RunE: func(*cobra.Command, []string) error {
-				c := api.NewClient(config.SocketPath())
-				if !c.Ping() {
-					fmt.Println("daemon not running")
-					return nil
-				}
-				if err := c.Do("POST", "/v1/shutdown", nil, nil, nil); err != nil {
+				stopped, err := stopDaemon()
+				if err != nil {
 					return err
 				}
-				for i := 0; i < 100 && c.Ping(); i++ {
-					time.Sleep(50 * time.Millisecond)
+				if stopped {
+					fmt.Println("daemon stopped")
+				} else {
+					fmt.Println("daemon not running")
 				}
-				fmt.Println("daemon stopped")
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use:   "restart",
+			Short: "Restart the daemon (e.g. after upgrading wtg)",
+			Long: `Stops and starts the daemon. Registered worktrees and services are kept;
+an active tunnel is stopped and must be started again.`,
+			RunE: func(*cobra.Command, []string) error {
+				if _, err := stopDaemon(); err != nil {
+					return err
+				}
+				if err := startDaemon(); err != nil {
+					return err
+				}
+				fmt.Println("daemon restarted")
 				return nil
 			},
 		},
@@ -91,4 +105,28 @@ func daemonCmd() *cobra.Command {
 		},
 	)
 	return cmd
+}
+
+// stopDaemon shuts the daemon down and waits for the process to exit (its
+// socket closes before the proxy has released the ports). It reports whether
+// a daemon was running.
+func stopDaemon() (bool, error) {
+	c := api.NewClient(config.SocketPath())
+	var st api.Status
+	if err := c.Do("GET", "/v1/status", nil, nil, &st); err != nil {
+		if errors.Is(err, api.ErrDaemonDown) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := c.Do("POST", "/v1/shutdown", nil, nil, nil); err != nil {
+		return true, err
+	}
+	for i := 0; i < 200 && daemon.ProcessAlive(st.PID); i++ {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if daemon.ProcessAlive(st.PID) {
+		return true, fmt.Errorf("daemon (pid %d) did not exit within 10s", st.PID)
+	}
+	return true, nil
 }

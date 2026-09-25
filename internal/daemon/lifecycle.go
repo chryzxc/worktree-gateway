@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chryzxc/worktree-gateway/internal/config"
@@ -164,33 +165,52 @@ func unchanged(old registry.Worktree, in registry.WorktreeInput) bool {
 }
 
 // checkHealth updates service status from PID liveness and TCP/HTTP probes.
+// Probes run concurrently so one slow health endpoint cannot delay the rest,
+// and every update is conditional on the registration being unchanged.
 func (d *Daemon) checkHealth(ctx context.Context) {
 	snap := d.reg.Snapshot()
+	var wg sync.WaitGroup
 	for _, s := range snap.Services {
-		if s.PID > 0 && !pidAlive(s.PID) {
-			d.log.Printf("service %s: process %d exited, deregistering", s.Key(), s.PID)
-			d.reg.Deregister(s.WorktreeID, s.Name, s.PID)
-			continue
-		}
 		wt, _ := snap.Worktree(s.WorktreeID)
-		up := probe(ctx, s, wt.ServiceConfig(s.Name).Health)
-		switch {
-		case up:
-			d.reg.SetStatus(s.Key(), registry.StatusUp)
-		case s.Status == registry.StatusStarting:
-			if s.PID == 0 && time.Since(s.RegisteredAt) > d.g.StaleAfter {
-				d.reg.Deregister(s.WorktreeID, s.Name, 0)
-			}
-		default:
-			if d.reg.SetStatus(s.Key(), registry.StatusDown) {
-				d.log.Printf("service %s on %s is down", s.Key(), s.Upstream())
-			}
-			if s.PID == 0 && !s.DownSince.IsZero() && time.Since(s.DownSince) > d.g.StaleAfter {
-				d.log.Printf("service %s stale for %s, deregistering", s.Key(), d.g.StaleAfter)
-				d.reg.Deregister(s.WorktreeID, s.Name, 0)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.checkService(ctx, s, wt.ServiceConfig(s.Name).Health)
+		}()
+	}
+	wg.Wait()
+}
+
+func (d *Daemon) checkService(ctx context.Context, s registry.Service, healthPath string) {
+	if s.PID > 0 && !ProcessAlive(s.PID) {
+		if d.reg.DeregisterIfCurrent(s) {
+			d.log.Printf("service %s: process %d exited, deregistered", s.Key(), s.PID)
+		}
+		return
+	}
+	switch {
+	case probe(ctx, s, healthPath):
+		d.reg.SetStatusIfCurrent(s, registry.StatusUp)
+	case s.Status == registry.StatusStarting:
+		if s.PID == 0 && time.Since(s.RegisteredAt) > d.g.StaleAfter {
+			d.reg.DeregisterIfCurrent(s)
+		}
+	default:
+		if d.reg.SetStatusIfCurrent(s, registry.StatusDown) {
+			d.log.Printf("service %s on %s is down", s.Key(), s.Upstream())
+		}
+		if s.PID == 0 && !s.DownSince.IsZero() && time.Since(s.DownSince) > d.g.StaleAfter {
+			if d.reg.DeregisterIfCurrent(s) {
+				d.log.Printf("service %s stale for %s, deregistered", s.Key(), d.g.StaleAfter)
 			}
 		}
 	}
+}
+
+// probeClient never follows redirects: a 3xx from the health path means the
+// app is up, and following it could leave loopback.
+var probeClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 func probe(ctx context.Context, s registry.Service, healthPath string) bool {
@@ -204,8 +224,11 @@ func probe(ctx context.Context, s registry.Service, healthPath string) bool {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+s.Upstream()+healthPath, nil)
-	resp, err := http.DefaultClient.Do(req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+s.Upstream()+healthPath, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := probeClient.Do(req)
 	if err != nil {
 		return false
 	}

@@ -192,7 +192,10 @@ func statusCmd() *cobra.Command {
 				if a.Project != b.Project {
 					return a.Project < b.Project
 				}
-				return a.IsMain || (!b.IsMain && a.Slug < b.Slug)
+				if a.IsMain != b.IsMain {
+					return a.IsMain
+				}
+				return a.Slug < b.Slug
 			})
 			if st.Tunnel.PublicURL != "" {
 				fmt.Printf("tunnel: %s (%s, %s)\n\n", st.Tunnel.PublicURL, st.Tunnel.Provider, st.Tunnel.State)

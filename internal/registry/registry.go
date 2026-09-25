@@ -441,12 +441,19 @@ func sameLoopback(a, b string) bool {
 // removed when it still belongs to that process (so a late exit of an old
 // process cannot remove its replacement).
 func (r *Registry) Deregister(worktreeID, name string, pid int) bool {
+	return r.deregister(worktreeID+"/"+name, func(s *Service) bool { return pid == 0 || s.PID == pid })
+}
+
+// DeregisterIfCurrent removes s only if it has not been re-registered since
+// it was read, so decisions made on a snapshot cannot remove a replacement.
+func (r *Registry) DeregisterIfCurrent(s Service) bool {
+	return r.deregister(s.Key(), func(cur *Service) bool { return sameRegistration(cur, &s) })
+}
+
+func (r *Registry) deregister(key string, match func(*Service) bool) bool {
 	r.mu.Lock()
-	key := worktreeID + "/" + name
 	s, ok := r.st.Services[key]
-	if ok && pid != 0 && s.PID != pid {
-		ok = false
-	}
+	ok = ok && match(s)
 	if ok {
 		delete(r.st.Services, key)
 		r.changed()
@@ -458,10 +465,25 @@ func (r *Registry) Deregister(worktreeID, name string, pid int) bool {
 	return ok
 }
 
+func sameRegistration(a, b *Service) bool {
+	return a.RegisteredAt.Equal(b.RegisteredAt) && a.Host == b.Host && a.Port == b.Port && a.PID == b.PID
+}
+
 // SetStatus updates health information. It reports whether routing changed.
-func (r *Registry) SetStatus(key, status string) bool {
+func (r *Registry) SetStatus(key, status string) bool { return r.setStatus(key, status, nil) }
+
+// SetStatusIfCurrent is SetStatus for a probe of s: it does nothing when the
+// service was re-registered while the probe ran.
+func (r *Registry) SetStatusIfCurrent(s Service, status string) bool {
+	return r.setStatus(s.Key(), status, &s)
+}
+
+func (r *Registry) setStatus(key, status string, probed *Service) bool {
 	r.mu.Lock()
 	s, ok := r.st.Services[key]
+	if ok && probed != nil && !sameRegistration(s, probed) {
+		ok = false
+	}
 	if !ok || s.Status == status {
 		if ok && status == StatusUp {
 			s.LastUp = r.now()

@@ -58,6 +58,10 @@ type Status struct {
 	Worktrees  []WorktreeView `json:"worktrees"`
 }
 
+type VersionResponse struct {
+	Version string `json:"version"`
+}
+
 type UpRequest struct {
 	Path string `json:"path"`
 	Name string `json:"name,omitempty"`

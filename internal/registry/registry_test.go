@@ -234,3 +234,31 @@ func TestParked(t *testing.T) {
 		t.Fatal("registering a service un-parks")
 	}
 }
+
+// A health decision made on a snapshot must not touch a service that was
+// re-registered while the probe ran.
+func TestGuardedUpdatesIgnoreReplacedRegistration(t *testing.T) {
+	r, main, _ := setup(t)
+	old, _, err := r.Register(RegisterInput{WorktreeID: main.ID, Name: "web", Port: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, _, _ := r.Register(RegisterInput{WorktreeID: main.ID, Name: "web", Port: 4001})
+
+	if r.SetStatusIfCurrent(old, StatusDown) {
+		t.Fatal("stale probe changed the replacement's status")
+	}
+	if r.DeregisterIfCurrent(old) {
+		t.Fatal("stale probe removed the replacement")
+	}
+	if s, ok := r.Snapshot().Service(main.ID, "web"); !ok || s.Port != 4001 || s.Status != StatusUp {
+		t.Fatalf("replacement changed: %+v %v", s, ok)
+	}
+
+	if !r.SetStatusIfCurrent(fresh, StatusDown) {
+		t.Fatal("current probe should update status")
+	}
+	if !r.DeregisterIfCurrent(fresh) {
+		t.Fatal("current registration should be removable")
+	}
+}

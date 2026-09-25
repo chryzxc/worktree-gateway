@@ -72,6 +72,9 @@ type none struct{}
 
 func (d *Daemon) apiHandler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/version", handle(func(context.Context, none, *http.Request) (any, error) {
+		return api.VersionResponse{Version: version.Version}, nil
+	}))
 	mux.HandleFunc("GET /v1/status", handle(func(ctx context.Context, _ none, _ *http.Request) (any, error) {
 		return d.status(), nil
 	}))

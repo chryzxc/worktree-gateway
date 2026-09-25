@@ -210,3 +210,31 @@ services:
 		t.Fatal("oauth state issued for unlisted callback")
 	}
 }
+
+// A second daemon on the same state dir must refuse to start without
+// touching the first one's socket.
+func TestSecondDaemonRefusesToStart(t *testing.T) {
+	state := t.TempDir()
+	unlock, err := lockFile(filepath.Join(state, "daemon.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	sockDir, _ := os.MkdirTemp("", "wtg")
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sock := filepath.Join(sockDir, "s")
+	os.WriteFile(sock, nil, 0o600) // stands in for the running daemon's socket
+
+	g := config.DefaultGlobal()
+	d, err := New(Options{StateDir: state, SocketPath: sock, Global: g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = d.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("Run = %v, want already running", err)
+	}
+	if _, err := os.Stat(sock); err != nil {
+		t.Fatalf("socket of the running daemon was removed: %v", err)
+	}
+}

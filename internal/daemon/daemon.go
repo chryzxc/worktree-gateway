@@ -114,6 +114,21 @@ func (d *Daemon) Run(ctx context.Context) error {
 	ctx, d.cancel = context.WithCancel(ctx)
 	d.started = time.Now()
 
+	// Hold the state-dir lock for the daemon's lifetime: two daemons racing
+	// through startup would otherwise both pass the socket check, and the
+	// loser would unlink the winner's socket before failing on the ports.
+	if err := os.MkdirAll(d.opt.StateDir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := lockFile(filepath.Join(d.opt.StateDir, "daemon.lock"))
+	if errors.Is(err, errLocked) {
+		return fmt.Errorf("a wtg daemon is already running for %s", d.opt.StateDir)
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	sock, err := listenSocket(d.opt.SocketPath)
 	if err != nil {
 		return err
@@ -251,6 +266,8 @@ func (d *Daemon) applyProxy(ctx context.Context) error {
 	d.mu.Unlock()
 	return err
 }
+
+var errLocked = errors.New("locked")
 
 func loopback(h string) string {
 	if h == "" || h == "localhost" {
