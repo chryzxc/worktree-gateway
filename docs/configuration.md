@@ -102,5 +102,6 @@ A detached HEAD uses the directory name. If two branches sanitize to the same la
 | `~/.local/state/worktree-gateway/` | `WTG_HOME`, `XDG_STATE_HOME` | registry, request log, OAuth key, Caddy data + CA, logs |
 | `<state>/wtg.sock` | `WTG_SOCKET` | control socket (0600) |
 | `<state>/daemon.log`, `<state>/caddy.log` | | daemon and Caddy logs |
+| `<state>/daemon.lock` | | held by the running daemon; prevents a second one from starting |
 
 Set `WTG_NO_AUTOSTART=1` to stop the CLI from auto-starting the daemon.

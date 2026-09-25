@@ -6,9 +6,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/chryzxc/worktree-gateway/releases"><img alt="release" src="https://img.shields.io/badge/release-v0.1.0-blue"></a>
-  <a href="go.mod"><img alt="go" src="https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white"></a>
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="https://github.com/chryzxc/worktree-gateway/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/chryzxc/worktree-gateway?sort=semver"></a>
+  <a href="https://pkg.go.dev/github.com/chryzxc/worktree-gateway"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/chryzxc/worktree-gateway.svg"></a>
+  <a href="https://goreportcard.com/report/github.com/chryzxc/worktree-gateway"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/chryzxc/worktree-gateway"></a>
+  <a href="go.mod"><img alt="go" src="https://img.shields.io/github/go-mod/go-version/chryzxc/worktree-gateway"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/chryzxc/worktree-gateway"></a>
   <img alt="platforms" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
 </p>
 
@@ -51,13 +53,11 @@ GitHub login  →  https://<tunnel>/_wg/oauth/callback              →  whichev
 
 **macOS / Linux (recommended)**
 
-The repository is private, so the installer downloads through the GitHub CLI (`gh auth login` once):
-
 ```sh
-gh api repos/chryzxc/worktree-gateway/contents/install.sh -H 'Accept: application/vnd.github.raw' | sh
+curl -fsSL https://raw.githubusercontent.com/chryzxc/worktree-gateway/main/install.sh | sh
 ```
 
-This installs the latest release to `~/.local/bin/wtg` and verifies its checksum. Set `WTG_INSTALL_DIR` to install somewhere else, or `WTG_VERSION=v0.1.0` to pin a version.
+This downloads the latest release, verifies its checksum and installs `wtg` to `~/.local/bin`. Set `WTG_INSTALL_DIR` to install somewhere else, or `WTG_VERSION=v0.1.0` to pin a version. The script is short; [read it](install.sh) before piping it to `sh` if you prefer.
 
 <details>
 <summary>Other methods</summary>
@@ -67,13 +67,21 @@ This installs the latest release to `~/.local/bin/wtg` and verifies its checksum
 **With Go 1.26+:**
 
 ```sh
-GOPRIVATE=github.com/chryzxc/worktree-gateway go install github.com/chryzxc/worktree-gateway/cmd/wtg@latest
+go install github.com/chryzxc/worktree-gateway/cmd/wtg@latest
 ```
 
 **From source:**
 
 ```sh
 git clone https://github.com/chryzxc/worktree-gateway && cd worktree-gateway && make install
+```
+
+**Shell completion** (bash, zsh, fish, PowerShell):
+
+```sh
+echo 'source <(wtg completion zsh)' >> ~/.zshrc     # zsh
+echo 'source <(wtg completion bash)' >> ~/.bashrc   # bash
+wtg completion fish > ~/.config/fish/completions/wtg.fish
 ```
 
 </details>
@@ -83,6 +91,10 @@ Check your setup:
 ```sh
 wtg doctor
 ```
+
+**Upgrading:** run the installer again, then `wtg daemon restart` so the background daemon picks up the new version. `wtg` warns you when the daemon and the CLI versions differ.
+
+**Uninstalling:** `wtg daemon stop && wtg untrust`, then delete `~/.local/bin/wtg`, `~/.config/worktree-gateway` and `~/.local/state/worktree-gateway`.
 
 ## Quick start
 
@@ -199,7 +211,8 @@ wtg hooks worktrunk --write   # new worktrees register themselves; removal clean
 | `wtg oauth state --callback /path` | Mint a signed OAuth state |
 | `wtg trust` / `wtg untrust` | Install or remove the local HTTPS CA |
 | `wtg doctor` · `wtg hosts` · `wtg hooks worktrunk` | Diagnostics and integrations |
-| `wtg daemon start\|stop\|status\|run` | Background daemon (auto-started) |
+| `wtg daemon start\|stop\|restart\|status` | Background daemon (auto-started) |
+| `wtg completion <shell>` | Shell completion script |
 
 Run `wtg <command> --help` for flags and examples.
 
@@ -269,6 +282,7 @@ Run `wtg doctor`, then check `~/.local/state/worktree-gateway/daemon.log`. Commo
 | Symptom | Fix |
 |---|---|
 | Browser certificate warning | `wtg trust` (restart Firefox) |
+| `the running daemon is vX but this binary is vY` | `wtg daemon restart` after upgrading |
 | `address already in use` | change `http_port` / `https_port` / `ingress.port` in `~/.config/worktree-gateway/config.yaml` |
 | Service stuck on `starting` | your server isn't listening on `$PORT` |
 | Webhook 404 through the tunnel | the path isn't in `public.paths`, or the worktree name is wrong (`wtg status`) |

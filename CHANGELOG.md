@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-25
+
+### Fixed
+
+- **Daemon auto-start race:** when several commands started the daemon at once (for example Worktrunk hooks in two worktrees), the losing daemon could delete the winner's socket, leaving an unreachable daemon that held the ports. The daemon now holds a lock file for its lifetime, and a CLI that loses the race uses the daemon that won.
+- **Health checks acting on stale data:** a slow probe could mark a just re-registered service as down, or deregister it. Updates now apply only if the registration is unchanged.
+- **Health checks run concurrently**, so one slow `health` endpoint no longer delays the others. Probes no longer follow redirects.
+- **`wtg status` ordering** used an inconsistent sort comparator.
+- **`go install` builds** now report their module version instead of `0.1.0-dev`.
+
+### Added
+
+- `wtg daemon restart`, and a warning when the running daemon's version differs from the CLI's (e.g. after an upgrade).
+- Shell completion docs, plus upgrade and uninstall instructions.
+
+### Changed
+
+- The repository is public. `install.sh` downloads release assets directly with curl or wget, so it no longer needs the GitHub CLI or a token.
+
 ## [0.1.0] - 2026-09-25
 
 First release. Covers the MVP, Phase 2 and Phase 3 from [docs/PLAN.md](docs/PLAN.md).
@@ -23,5 +42,6 @@ First release. Covers the MVP, Phase 2 and Phase 3 from [docs/PLAN.md](docs/PLAN
 - **Request log:** bounded and redacted, with source detection (Stripe, GitHub, Slack and others), plus guarded replay with `wtg replay`.
 - **OAuth callbacks:** routed to the right worktree using HMAC-signed, expiring, single-use state. Supports GET and `form_post`.
 
-[Unreleased]: https://github.com/chryzxc/worktree-gateway/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/chryzxc/worktree-gateway/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/chryzxc/worktree-gateway/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/chryzxc/worktree-gateway/releases/tag/v0.1.0
