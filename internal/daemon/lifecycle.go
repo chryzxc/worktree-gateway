@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -234,6 +235,58 @@ func probe(ctx context.Context, s registry.Service, healthPath string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode < 500
+}
+
+// StopServices terminates the processes registered for a worktree's service
+// (every service when name is "") and deregisters them. Services registered
+// without a PID are left alone: wtg did not start them and cannot stop them.
+func (d *Daemon) StopServices(wt registry.Worktree, name string) []string {
+	stopped := []string{}
+	for _, s := range d.reg.Snapshot().Services {
+		if s.WorktreeID != wt.ID || (name != "" && s.Name != name) || s.PID <= 0 {
+			continue
+		}
+		d.stopService(s, "stopped")
+		stopped = append(stopped, s.Name)
+	}
+	return stopped
+}
+
+func (d *Daemon) stopService(s registry.Service, why string) {
+	stopProcess(s.PID)
+	d.reg.DeregisterIfCurrent(s)
+	d.log.Printf("service %s: process %d %s", s.Key(), s.PID, why)
+}
+
+// enforceLimits stops `wtg run` processes past their TTL, then the oldest ones
+// beyond max_services, so forgotten dev servers cannot pile up and eat memory.
+// ponytail: TTL counts from start, not from the last request; an idle timeout
+// would need traffic accounting through the proxy.
+func (d *Daemon) enforceLimits() {
+	snap := d.reg.Snapshot()
+	var live []registry.Service
+	for _, s := range snap.Services {
+		if s.PID <= 0 {
+			continue // not started by wtg; nothing to stop
+		}
+		wt, _ := snap.Worktree(s.WorktreeID)
+		ttl := d.g.ServiceTTL
+		if t := wt.ServiceConfig(s.Name).TTL; t > 0 {
+			ttl = t
+		}
+		if ttl > 0 && time.Since(s.RegisteredAt) > ttl {
+			d.stopService(s, fmt.Sprintf("stopped after ttl %s", ttl))
+			continue
+		}
+		live = append(live, s)
+	}
+	if d.g.MaxServices <= 0 || len(live) <= d.g.MaxServices {
+		return
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].RegisteredAt.Before(live[j].RegisteredAt) })
+	for _, s := range live[:len(live)-d.g.MaxServices] {
+		d.stopService(s, fmt.Sprintf("stopped: over max_services %d", d.g.MaxServices))
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -87,6 +87,39 @@ func downCmd() *cobra.Command {
 	return cmd
 }
 
+func stopCmd() *cobra.Command {
+	var path string
+	cmd := &cobra.Command{
+		Use:   "stop [service]",
+		Short: "Stop the worktree's running services (all, or one) and remove their routes",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			p, err := pathArg(path)
+			if err != nil {
+				return err
+			}
+			c := api.NewClient(config.SocketPath())
+			if !c.Ping() {
+				return nil // nothing is registered when the daemon is not running
+			}
+			req := api.StopRequest{Path: p}
+			if len(args) == 1 {
+				req.Service = args[0]
+			}
+			var out api.StopResponse
+			if err := c.Do("POST", "/v1/stop", nil, req, &out); err != nil {
+				return err
+			}
+			for _, s := range out.Stopped {
+				fmt.Printf("stopped %s\n", s)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&path, "path", "", "worktree path (default: cwd)")
+	return cmd
+}
+
 func registerCmd() *cobra.Command {
 	var path, host string
 	var port, pid int
@@ -365,7 +398,8 @@ func runCmd() *cobra.Command {
 		Long: `Allocates a stable port, exports PORT and the WG_* identity variables,
 runs the command (or services.<name>.command from wtg.yaml), registers the
 service while it runs and deregisters it on exit. Exits with the command's
-status. wtg is not a supervisor: it does not restart the command.`,
+status. A previous run of the same service in this worktree is stopped
+first. wtg is not a supervisor: it does not restart the command.`,
 		Example: `  wtg run web -- npm run dev
   wtg run api -- go run ./cmd/api
   wtg run            # default service, command from wtg.yaml`,
@@ -401,6 +435,15 @@ status. wtg is not a supervisor: it does not restart the command.`,
 			c, err := client()
 			if err != nil {
 				return err
+			}
+			// The port is stable per worktree+service, so a previous `wtg run`
+			// still holding it would make this one fail: replace it.
+			var sr api.StopResponse
+			if err := c.Do("POST", "/v1/stop", nil, api.StopRequest{Path: p, Service: svc}, &sr); err != nil {
+				return err
+			}
+			if len(sr.Stopped) > 0 {
+				fmt.Fprintf(os.Stderr, "wtg: stopped previous %s\n", svc)
 			}
 			var pr api.PortResponse
 			if err := c.Do("POST", "/v1/port", nil, api.PortRequest{Path: p, Service: svc}, &pr); err != nil {

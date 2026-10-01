@@ -111,6 +111,13 @@ func (d *Daemon) apiHandler() http.Handler {
 		}
 		return map[string]bool{"removed": d.reg.Deregister(wt.ID, in.Service, in.PID)}, nil
 	}))
+	mux.HandleFunc("POST /v1/stop", handle(func(ctx context.Context, in api.StopRequest, _ *http.Request) (any, error) {
+		wt, err := d.worktreeForPath(ctx, in.Path)
+		if err != nil {
+			return nil, err
+		}
+		return api.StopResponse{Stopped: d.StopServices(wt, in.Service)}, nil
+	}))
 	mux.HandleFunc("POST /v1/port", handle(func(ctx context.Context, in api.PortRequest, _ *http.Request) (any, error) {
 		wt, err := d.SyncPath(ctx, in.Path, "")
 		if err != nil {

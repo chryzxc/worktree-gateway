@@ -200,7 +200,8 @@ wtg hooks worktrunk --write   # new worktrees register themselves; removal clean
 | Command | Description |
 |---|---|
 | `wtg init` | Create a starter `wtg.yaml` |
-| `wtg run [svc] [-- cmd…]` | Run a dev server with `$PORT` and identity env, routed while it runs |
+| `wtg run [svc] [-- cmd…]` | Run a dev server with `$PORT` and identity env, routed while it runs; replaces a previous run of the same service |
+| `wtg stop [svc]` | Stop the worktree's `wtg run` servers (all, or one) and drop their routes |
 | `wtg open [svc]` | Open the worktree's URL in the browser |
 | `wtg status [-a] [--json]` | Worktrees, services, health and URLs |
 | `wtg up` / `wtg down [--forget]` | Register a worktree or take its routes down (usually automatic) |

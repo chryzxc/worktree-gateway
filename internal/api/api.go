@@ -93,6 +93,16 @@ type DeregisterRequest struct {
 	PID     int    `json:"pid,omitempty"`
 }
 
+// StopRequest stops a worktree's registered processes (all when Service is empty).
+type StopRequest struct {
+	Path    string `json:"path"`
+	Service string `json:"service,omitempty"`
+}
+
+type StopResponse struct {
+	Stopped []string `json:"stopped"`
+}
+
 type PortRequest struct {
 	Path    string `json:"path"`
 	Service string `json:"service"`

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `service_ttl` (default 2h, per-service `ttl` in wtg.yaml) and `max_services` (default 3): the daemon stops `wtg run` servers past their TTL and the oldest beyond the cap, so forgotten dev servers stop eating memory.
+- `wtg stop [service]` stops a worktree's running services (SIGTERM to the process group, SIGKILL after 5s) and removes their routes.
+
+### Fixed
+
+- `wtg run` now stops a previous run of the same service in the worktree before starting. Restarting a dev server used to orphan the old one on the same stable port.
+
 ## [0.1.1] - 2026-09-25
 
 ### Fixed

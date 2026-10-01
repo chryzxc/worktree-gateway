@@ -168,7 +168,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.log.Printf("proxy reload failed: %v", err)
 		}
 	})
-	d.loop(ctx, "health", d.g.HealthInterval, func() { d.checkHealth(ctx) })
+	d.loop(ctx, "health", d.g.HealthInterval, func() { d.checkHealth(ctx); d.enforceLimits() })
 	d.loop(ctx, "discovery", d.g.DiscoveryInterval, func() { d.discover(ctx) })
 
 	var runErr error

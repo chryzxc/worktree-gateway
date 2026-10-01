@@ -46,6 +46,8 @@ type Service struct {
 	// OAuthCallbacks lists local callback paths that signed OAuth state may
 	// route to.
 	OAuthCallbacks []string `yaml:"oauth_callbacks"`
+	// TTL overrides the global service_ttl for this service's `wtg run`.
+	TTL time.Duration `yaml:"ttl"`
 }
 
 // Public is the exposure allowlist of a service.
@@ -220,6 +222,10 @@ type Global struct {
 	DiscoveryInterval time.Duration `yaml:"discovery_interval"`
 	StaleAfter        time.Duration `yaml:"stale_after"`
 	PortRange         [2]int        `yaml:"port_range"`
+	// ServiceTTL stops a `wtg run` process this long after it started (0: never).
+	ServiceTTL time.Duration `yaml:"service_ttl"`
+	// MaxServices caps live `wtg run` processes; the oldest are stopped first (0: no cap).
+	MaxServices int `yaml:"max_services"`
 }
 
 type ProxySettings struct {
@@ -284,6 +290,8 @@ func DefaultGlobal() Global {
 		DiscoveryInterval: 10 * time.Second,
 		StaleAfter:        10 * time.Minute,
 		PortRange:         [2]int{20000, 29999},
+		ServiceTTL:        2 * time.Hour,
+		MaxServices:       3,
 	}
 }
 
@@ -320,6 +328,9 @@ func (g Global) Validate() error {
 	case "cloudflared", "ngrok", "external":
 	default:
 		return fmt.Errorf("tunnel.provider must be cloudflared, ngrok or external, got %q", g.Tunnel.Provider)
+	}
+	if g.ServiceTTL < 0 || g.MaxServices < 0 {
+		return errors.New("service_ttl and max_services must not be negative")
 	}
 	if g.PortRange[0] < 1024 || g.PortRange[1] > 65535 || g.PortRange[0] >= g.PortRange[1] {
 		return fmt.Errorf("port_range %v is invalid", g.PortRange)

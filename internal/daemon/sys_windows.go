@@ -4,6 +4,8 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
+	"strconv"
 
 	"golang.org/x/sys/windows"
 )
@@ -39,4 +41,9 @@ func lockFile(path string) (release func(), err error) {
 		return nil, err
 	}
 	return func() { windows.UnlockFileEx(h, 0, 1, 0, ol); f.Close() }, nil
+}
+
+// stopProcess kills pid and its child tree.
+func stopProcess(pid int) {
+	exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
 }
