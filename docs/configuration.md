@@ -65,7 +65,8 @@ discovery_interval: 10s
 stale_after: 10m              # unhealthy registrations without a PID are dropped
 port_range: [20000, 29999]
 service_ttl: 2h               # `wtg run` servers are stopped this long after start (0: never)
-max_services: 3               # live `wtg run` servers; starting one more stops the oldest (0: no cap)
+max_worktrees: 3              # worktrees with live `wtg run` servers; starting one more stops all of the oldest one's (0: no cap)
+max_services: 0               # live `wtg run` servers; starting one more stops the oldest (0: no cap)
 ```
 
 ## Environment variables

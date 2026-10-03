@@ -77,3 +77,39 @@ func TestEnforceLimits(t *testing.T) {
 		t.Fatalf("%d services still registered", n)
 	}
 }
+
+func TestMaxWorktreesStopsWholeOldestWorktree(t *testing.T) {
+	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree := func(name string) registry.Worktree {
+		wt, err := reg.UpsertWorktree(registry.WorktreeInput{CommonDir: "/r/.git", MainPath: "/r", AdminID: name, Branch: name, Path: "/r/" + name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wt
+	}
+	start := func(wt registry.Worktree, name string, port int) int {
+		cmd := exec.Command("sh", "-c", "sleep 60; true")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		go cmd.Wait()
+		t.Cleanup(func() { cmd.Process.Kill() })
+		if _, _, err := reg.Register(registry.RegisterInput{WorktreeID: wt.ID, Name: name, Port: port, PID: cmd.Process.Pid}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+		return cmd.Process.Pid
+	}
+	a, b := worktree("a"), worktree("b")
+	aAPI, bAPI, bWeb := start(a, "api", 20011), start(b, "api", 20012), start(b, "web", 20013)
+	aWeb := start(a, "web", 20014) // a restarted its web last: a is now the newest worktree
+	d := &Daemon{reg: reg, log: log.New(io.Discard, "", 0), g: config.Global{MaxWorktrees: 1}}
+
+	d.enforceLimits()
+	if ProcessAlive(bAPI) || ProcessAlive(bWeb) || !ProcessAlive(aAPI) || !ProcessAlive(aWeb) {
+		t.Fatal("max_worktrees should stop every service of the least recently started worktree only")
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -259,7 +260,7 @@ func (d *Daemon) stopService(s registry.Service, why string) {
 }
 
 // enforceLimits stops `wtg run` processes past their TTL, then the oldest ones
-// beyond max_services, so forgotten dev servers cannot pile up and eat memory.
+// beyond max_worktrees and max_services, so forgotten dev servers cannot pile up and eat memory.
 // ponytail: TTL counts from start, not from the last request; an idle timeout
 // would need traffic accounting through the proxy.
 func (d *Daemon) enforceLimits() {
@@ -280,10 +281,27 @@ func (d *Daemon) enforceLimits() {
 		}
 		live = append(live, s)
 	}
+	sort.Slice(live, func(i, j int) bool { return live[i].RegisteredAt.Before(live[j].RegisteredAt) })
+	if n := d.g.MaxWorktrees; n > 0 {
+		var order []string // worktrees by their newest start, oldest first
+		for _, s := range live {
+			order = slices.DeleteFunc(order, func(id string) bool { return id == s.WorktreeID })
+			order = append(order, s.WorktreeID)
+		}
+		if len(order) > n {
+			stale := order[:len(order)-n]
+			live = slices.DeleteFunc(live, func(s registry.Service) bool {
+				if !slices.Contains(stale, s.WorktreeID) {
+					return false
+				}
+				d.stopService(s, fmt.Sprintf("stopped: over max_worktrees %d", n))
+				return true
+			})
+		}
+	}
 	if d.g.MaxServices <= 0 || len(live) <= d.g.MaxServices {
 		return
 	}
-	sort.Slice(live, func(i, j int) bool { return live[i].RegisteredAt.Before(live[j].RegisteredAt) })
 	for _, s := range live[:len(live)-d.g.MaxServices] {
 		d.stopService(s, fmt.Sprintf("stopped: over max_services %d", d.g.MaxServices))
 	}

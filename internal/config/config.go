@@ -226,6 +226,9 @@ type Global struct {
 	ServiceTTL time.Duration `yaml:"service_ttl"`
 	// MaxServices caps live `wtg run` processes; the oldest are stopped first (0: no cap).
 	MaxServices int `yaml:"max_services"`
+	// MaxWorktrees caps worktrees with live `wtg run` processes; starting one more
+	// stops every service of the least recently started worktree (0: no cap).
+	MaxWorktrees int `yaml:"max_worktrees"`
 }
 
 type ProxySettings struct {
@@ -291,7 +294,7 @@ func DefaultGlobal() Global {
 		StaleAfter:        10 * time.Minute,
 		PortRange:         [2]int{20000, 29999},
 		ServiceTTL:        2 * time.Hour,
-		MaxServices:       3,
+		MaxWorktrees:      3,
 	}
 }
 
@@ -329,8 +332,8 @@ func (g Global) Validate() error {
 	default:
 		return fmt.Errorf("tunnel.provider must be cloudflared, ngrok or external, got %q", g.Tunnel.Provider)
 	}
-	if g.ServiceTTL < 0 || g.MaxServices < 0 {
-		return errors.New("service_ttl and max_services must not be negative")
+	if g.ServiceTTL < 0 || g.MaxServices < 0 || g.MaxWorktrees < 0 {
+		return errors.New("service_ttl, max_services and max_worktrees must not be negative")
 	}
 	if g.PortRange[0] < 1024 || g.PortRange[1] > 65535 || g.PortRange[0] >= g.PortRange[1] {
 		return fmt.Errorf("port_range %v is invalid", g.PortRange)
