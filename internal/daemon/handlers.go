@@ -118,6 +118,21 @@ func (d *Daemon) apiHandler() http.Handler {
 		}
 		return api.StopResponse{Stopped: d.StopServices(wt, in.Service)}, nil
 	}))
+	mux.HandleFunc("POST /v1/run/prepare", handle(func(ctx context.Context, in api.PortRequest, _ *http.Request) (any, error) {
+		if in.Service == "" {
+			return nil, badRequest("service is required")
+		}
+		wt, err := d.SyncPath(ctx, in.Path, "")
+		if err != nil {
+			return nil, err
+		}
+		stopped := d.StopServices(wt, in.Service)
+		port, err := d.AllocPort(wt, in.Service)
+		if err != nil {
+			return nil, err
+		}
+		return api.PrepareRunResponse{Port: port, Env: d.Env(wt, in.Service, port), Stopped: stopped}, nil
+	}))
 	mux.HandleFunc("POST /v1/port", handle(func(ctx context.Context, in api.PortRequest, _ *http.Request) (any, error) {
 		wt, err := d.SyncPath(ctx, in.Path, "")
 		if err != nil {

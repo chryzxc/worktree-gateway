@@ -138,7 +138,9 @@ wtg run api -- go run ./cmd/api   # any command; gets PORT and WG_* env
 wtg register db-admin --port 8081 # route something you started yourself
 ```
 
-`wtg run` injects identity env vars. Apps use them to build absolute URLs and to find their sibling services:
+`wtg run` starts the daemon and registers the worktree automatically; no separate `wtg up`, `wtg port` or `wtg env` step is needed. Run it again to replace that service without stopping its siblings.
+
+It injects identity env vars. Apps use them to build absolute URLs and to find their sibling services:
 
 ```sh
 WG_URL=https://feature-auth.shop.localhost:8743

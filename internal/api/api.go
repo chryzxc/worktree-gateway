@@ -112,6 +112,13 @@ type PortResponse struct {
 	Port int `json:"port"`
 }
 
+// PrepareRunResponse combines replacement, port allocation and identity env.
+type PrepareRunResponse struct {
+	Port    int               `json:"port"`
+	Env     map[string]string `json:"env"`
+	Stopped []string          `json:"stopped"`
+}
+
 type EnvRequest struct {
 	Path    string `json:"path"`
 	Service string `json:"service,omitempty"`
