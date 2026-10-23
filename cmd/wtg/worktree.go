@@ -436,24 +436,16 @@ first. wtg is not a supervisor: it does not restart the command.`,
 			if err != nil {
 				return err
 			}
-			// The port is stable per worktree+service, so a previous `wtg run`
-			// still holding it would make this one fail: replace it.
-			var sr api.StopResponse
-			if err := c.Do("POST", "/v1/stop", nil, api.StopRequest{Path: p, Service: svc}, &sr); err != nil {
+			// Resolve Git identity once for stop, port and env. Sync before
+			// stopping so the first run does not require a separate `wtg up`.
+			var prep api.PrepareRunResponse
+			if err := c.Do("POST", "/v1/run/prepare", nil, api.PortRequest{Path: p, Service: svc}, &prep); err != nil {
 				return err
 			}
-			if len(sr.Stopped) > 0 {
+			if len(prep.Stopped) > 0 {
 				fmt.Fprintf(os.Stderr, "wtg: stopped previous %s\n", svc)
 			}
-			var pr api.PortResponse
-			if err := c.Do("POST", "/v1/port", nil, api.PortRequest{Path: p, Service: svc}, &pr); err != nil {
-				return err
-			}
-			var env map[string]string
-			if err := c.Do("POST", "/v1/env", nil, api.EnvRequest{Path: p, Service: svc, Port: pr.Port}, &env); err != nil {
-				return err
-			}
-			return runService(c, p, svc, pr.Port, env, command)
+			return runService(c, p, svc, prep.Port, prep.Env, command)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", "", "worktree path (default: cwd)")

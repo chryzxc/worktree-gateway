@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `wtg run` works on a fresh worktree without a separate `wtg up`. Startup now combines replacement, port allocation and identity environment into one daemon request instead of resolving the same Git worktree three times.
 - `wtg run` now stops a previous run of the same service in the worktree before starting. Restarting a dev server used to orphan the old one on the same stable port.
 
 ## [0.1.1] - 2026-09-25
